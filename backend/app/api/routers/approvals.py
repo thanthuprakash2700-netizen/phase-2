@@ -8,6 +8,8 @@ from app.db.session import get_db
 from app.api import deps
 from app.models.user import User
 from app.models.approval import Approval, ApprovalHistory, ApprovalStatus, ApprovalLevel
+from app.models.audit_log import AuditLog
+from app.models.notification import Notification
 from app.schemas.approval import ApprovalCreate, ApprovalOut, ApprovalAction, ApprovalHistoryOut
 
 router = APIRouter(prefix="/approvals", tags=["approvals"])
@@ -28,6 +30,22 @@ def create_approval(
     db.add(approval)
     db.commit()
     db.refresh(approval)
+
+    audit = AuditLog(user_id=current_user.id, action="CREATE_APPROVAL", entity="APPROVAL", entity_id=approval.id)
+    db.add(audit)
+
+    # Notify managers and admins of the new approval request
+    managers = db.query(User).filter(User.role.in_(["manager", "admin"])).all()
+    for mgr in managers:
+        if mgr.id != current_user.id:
+            notif = Notification(
+                user_id=mgr.id,
+                message=f"New approval request '{approval.title}' submitted by {current_user.name}."
+            )
+            db.add(notif)
+            
+    db.commit()
+
     return approval
 
 @router.get("/", response_model=List[ApprovalOut])
@@ -89,6 +107,13 @@ def take_approval_action(
         comment=action_in.comment
     )
     db.add(history)
+    
+    audit = AuditLog(user_id=current_user.id, action=f"APPROVAL_{action_in.action.upper()}", entity="APPROVAL", entity_id=approval.id)
+    db.add(audit)
+    
+    notif = Notification(user_id=approval.requested_by_id, message=f"Your approval request '{approval.title}' has been {action_in.action}.")
+    db.add(notif)
+    
     db.commit()
     db.refresh(approval)
     return approval

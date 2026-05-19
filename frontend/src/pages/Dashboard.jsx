@@ -19,7 +19,10 @@ import {
   BarChart as BarChartIcon, 
   TrendingUp, 
   PieChart as PieChartIcon,
-  User as UserIcon
+  User as UserIcon,
+  Zap,
+  Bell,
+  Activity
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -35,33 +38,46 @@ const Dashboard = () => {
   const [summary, setSummary] = useState(null);
   const [distribution, setDistribution] = useState([]);
   const [performance, setPerformance] = useState([]);
+  const [aiSummary, setAiSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [users, setUsers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [auditLogs, setAuditLogs] = useState([]);
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const [tasksRes, summaryRes, distRes, perfRes] = await Promise.all([
+      const [tasksRes, summaryRes, distRes, perfRes, aiRes, notifRes] = await Promise.all([
         api.get('/tasks/'),
         dashboardService.getSummary(),
         dashboardService.getTaskDistribution(),
-        dashboardService.getPerformance()
+        dashboardService.getPerformance(),
+        api.get('/dashboard/ai-summary'),
+        api.get('/notifications/')
       ]);
       
       setTasks(tasksRes.data);
       setSummary(summaryRes.data);
       setDistribution(distRes.data);
       setPerformance(perfRes.data);
+      setAiSummary(aiRes.data);
+      setNotifications(notifRes.data);
+
+      if (user?.role === 'admin') {
+        const logsRes = await api.get('/audit-logs/');
+        setAuditLogs(logsRes.data);
+      }
     } catch (error) {
       console.error('Error fetching dashboard data', error);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user?.role]);
 
   const fetchUsers = useCallback(async () => {
     if (user?.role === 'admin' || user?.role === 'manager') {
@@ -109,6 +125,17 @@ const Dashboard = () => {
     }
   };
 
+  const handleMarkAsRead = async (id) => {
+    try {
+      await api.patch(`/notifications/${id}/read`);
+      setNotifications(notifications.map(n => n.id === id ? { ...n, is_read: true } : n));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const unreadCount = notifications.filter(n => !n.is_read).length;
+
   if (!user) return null;
 
   return (
@@ -121,7 +148,62 @@ const Dashboard = () => {
         </div>
         
         <div className="flex items-center gap-4">
-          <div className="relative flex-1 md:flex-none">
+          <div className="relative">
+            <button 
+              onClick={() => setShowNotifications(!showNotifications)}
+              className="p-2.5 bg-white rounded-full text-slate-500 hover:text-primary hover:bg-primary/5 transition-all relative shadow-sm border border-slate-100"
+            >
+              <Bell size={20} />
+              {unreadCount > 0 && (
+                <span className="absolute top-0 right-0 w-5 h-5 bg-rose-500 text-white rounded-full text-[10px] font-bold flex items-center justify-center border-2 border-white">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+            
+            <AnimatePresence>
+              {showNotifications && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute right-0 top-full mt-3 w-80 bg-white rounded-2xl shadow-xl shadow-black/10 border border-slate-100 z-50 overflow-hidden"
+                >
+                  <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                    <h4 className="font-bold text-slate-800">Notifications</h4>
+                    {unreadCount > 0 && <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-md font-bold">{unreadCount} New</span>}
+                  </div>
+                  <div className="max-h-80 overflow-y-auto p-2">
+                    {notifications.length === 0 ? (
+                      <div className="p-6 text-center text-slate-500 text-sm">No notifications</div>
+                    ) : (
+                      notifications.slice(0, 5).map(notif => (
+                        <div 
+                          key={notif.id} 
+                          onClick={() => !notif.is_read && handleMarkAsRead(notif.id)}
+                          className={`p-3 rounded-xl mb-1 cursor-pointer transition-colors ${notif.is_read ? 'opacity-60 hover:bg-slate-50' : 'bg-primary/5 hover:bg-primary/10'}`}
+                        >
+                          <p className="text-sm text-slate-700 font-medium">{notif.message}</p>
+                          <p className="text-[10px] text-slate-400 mt-1 font-bold">{new Date(notif.created_at).toLocaleTimeString()}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="p-3 border-t border-slate-100 bg-slate-50 text-center">
+                    <Link 
+                      to="/notifications" 
+                      onClick={() => setShowNotifications(false)}
+                      className="text-xs font-bold text-primary hover:underline"
+                    >
+                      View All Notifications
+                    </Link>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          <div className="relative hidden md:block">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input 
               type="text" 
@@ -170,6 +252,26 @@ const Dashboard = () => {
           trend="+8%" 
         />
       </div>
+
+      {/* AI Insights Section */}
+      {aiSummary && aiSummary.insights && aiSummary.insights.length > 0 && (
+        <div className="card mb-10 border-l-4 border-l-purple-500 bg-gradient-to-r from-purple-50/50 to-transparent">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="p-2 bg-purple-100 text-purple-600 rounded-lg">
+              <Zap size={20} />
+            </div>
+            <h3 className="font-bold text-slate-800 text-lg">AI Dashboard Intelligence</h3>
+          </div>
+          <ul className="space-y-3 pl-2">
+            {aiSummary.insights.map((insight, idx) => (
+              <li key={idx} className="flex items-start gap-3">
+                <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0"></span>
+                <span className="text-slate-700 font-medium">{insight}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-10">
         {/* Task Distribution Chart */}
@@ -224,6 +326,113 @@ const Dashboard = () => {
                 <Bar dataKey="completed_count" fill="#6366f1" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* Dashboard Intelligence Hub: Activity Feed & In-App Notifications */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-10">
+        {/* Activity Feed (Audit Logs) */}
+        <div className="lg:col-span-2 card">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="font-bold text-slate-800 flex items-center gap-2">
+              <Activity className="text-indigo-500" size={18} />
+              Enterprise Activity Feed
+            </h3>
+            <span className="text-xs bg-slate-100 text-slate-500 px-2.5 py-1 rounded-full font-bold">
+              {user.role === 'admin' ? 'System Logs' : 'My Tasks Activity'}
+            </span>
+          </div>
+          
+          <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2">
+            {user.role === 'admin' ? (
+              auditLogs.length > 0 ? (
+                auditLogs.slice(0, 5).map((log) => (
+                  <div key={log.id} className="flex items-start justify-between p-3 border border-slate-50 rounded-xl hover:bg-slate-50 transition-colors">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-md uppercase tracking-wider">{log.action.replace(/_/g, ' ')}</span>
+                        <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-md font-bold uppercase">{log.entity}</span>
+                        <span className="text-[10px] text-slate-400 font-medium">ID: {log.entity_id}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-2 font-medium">Performed by User ID: {log.user_id}</p>
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-bold shrink-0">
+                      {new Date(log.timestamp).toLocaleTimeString()}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-center text-slate-400 text-sm py-6">No recent system activity logged.</p>
+              )
+            ) : (
+              // Non-admin feed shows recent updates on their tasks
+              tasks.length > 0 ? (
+                tasks.slice(0, 5).map((task) => (
+                  <div key={task.id} className="flex items-start justify-between p-3 border border-slate-50 rounded-xl hover:bg-slate-50 transition-colors">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-[10px] bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded-md uppercase">Task Assigned</span>
+                        <span className="text-xs font-bold text-slate-800">{task.title}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-2 font-medium">
+                        Status: <span className="font-bold capitalize">{task.status.replace('_', ' ')}</span> | Priority: <span className="font-bold capitalize">{task.priority}</span>
+                      </p>
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-bold shrink-0">
+                      {task.due_date ? new Date(task.due_date).toLocaleDateString() : 'No Due Date'}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-center text-slate-400 text-sm py-6">No tasks activity found.</p>
+              )
+            )}
+          </div>
+        </div>
+
+        {/* Notifications Panel */}
+        <div className="lg:col-span-1 card">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="font-bold text-slate-800 flex items-center gap-2">
+              <Bell className="text-rose-500" size={18} />
+              In-App Notifications
+            </h3>
+            {unreadCount > 0 && (
+              <span className="text-xs bg-rose-100 text-rose-600 px-2 py-1 rounded-full font-bold">
+                {unreadCount} New
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+            {notifications.length === 0 ? (
+              <div className="text-center py-10 text-slate-400 text-sm">
+                No notifications yet.
+              </div>
+            ) : (
+              notifications.slice(0, 5).map((notif) => (
+                <div 
+                  key={notif.id}
+                  onClick={() => !notif.is_read && handleMarkAsRead(notif.id)}
+                  className={`p-3 rounded-xl cursor-pointer border transition-all ${
+                    notif.is_read 
+                      ? 'border-slate-50 bg-slate-50/50 opacity-60 hover:bg-slate-50' 
+                      : 'border-rose-100 bg-rose-50/30 hover:bg-rose-50/50'
+                  }`}
+                >
+                  <p className="text-xs font-bold text-slate-700 leading-relaxed">{notif.message}</p>
+                  <div className="flex justify-between items-center mt-2">
+                    <span className="text-[10px] text-slate-400 font-bold">
+                      {new Date(notif.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    {!notif.is_read && (
+                      <span className="text-[9px] bg-rose-500 text-white px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Mark Read</span>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

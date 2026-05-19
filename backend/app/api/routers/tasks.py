@@ -6,6 +6,8 @@ from app.db.session import get_db
 from app.models.task import Task, StatusEnum
 from app.models.user import User
 from app.models.comment import Comment
+from app.models.audit_log import AuditLog
+from app.models.notification import Notification
 from app.schemas.task import TaskAssign, TaskCreate, TaskOut, TaskUpdate
 from app.schemas.comment import CommentCreate, CommentOut
 
@@ -63,6 +65,15 @@ def create_task(
     db.add(task)
     db.commit()
     db.refresh(task)
+
+    audit = AuditLog(user_id=current_user.id, action="CREATE_TASK", entity="TASK", entity_id=task.id)
+    db.add(audit)
+
+    if task.assigned_to_id:
+        notif = Notification(user_id=task.assigned_to_id, message=f"You have been assigned a new task: {task.title}")
+        db.add(notif)
+    
+    db.commit()
     return task
 
 
@@ -152,6 +163,17 @@ def update_task(
     db.add(task)
     db.commit()
     db.refresh(task)
+
+    # Log task update
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="UPDATE_TASK",
+        entity="TASK",
+        entity_id=task.id
+    )
+    db.add(audit)
+    db.commit()
+
     return task
 
 
@@ -164,6 +186,15 @@ def delete_task(
     task = _get_task_or_404(db, task_id)
     if current_user.role == "manager" and task.created_by_id != current_user.id:
         raise HTTPException(status_code=403, detail="Forbidden")
+    
+    # Audit log before deletion so we don't lose entity context
+    audit = AuditLog(
+        user_id=current_user.id,
+        action=f"DELETE_TASK: '{task.title}'",
+        entity="TASK",
+        entity_id=task.id
+    )
+    db.add(audit)
     db.delete(task)
     db.commit()
     return None
@@ -190,6 +221,13 @@ def assign_task(
 
     task.assigned_to_id = assignee.id
     db.add(task)
+    
+    audit = AuditLog(user_id=current_user.id, action="ASSIGN_TASK", entity="TASK", entity_id=task.id)
+    db.add(audit)
+    
+    notif = Notification(user_id=assignee.id, message=f"You have been assigned to task: {task.title}")
+    db.add(notif)
+    
     db.commit()
     db.refresh(task)
     return task
@@ -215,9 +253,28 @@ def update_task_status(
     # Validate transition
     _validate_status_transition(task.status, new_status)
 
+    old_status = task.status
     task.status = new_status
     task.updated_by_id = current_user.id
     db.add(task)
+    
+    # Audit log: User updated Task #5 -> Status DONE
+    audit = AuditLog(
+        user_id=current_user.id,
+        action=f"UPDATE_TASK_STATUS: {old_status.value.upper()} -> {new_status.value.upper()}",
+        entity="TASK",
+        entity_id=task.id
+    )
+    db.add(audit)
+    
+    # If a task is moved to completed/done, notify the creator
+    if new_status == StatusEnum.done and task.created_by_id and task.created_by_id != current_user.id:
+        notif = Notification(
+            user_id=task.created_by_id,
+            message=f"Task '{task.title}' has been completed by {current_user.name}."
+        )
+        db.add(notif)
+
     db.commit()
     db.refresh(task)
     return task
@@ -237,6 +294,15 @@ def add_comment(
         is_internal=comment_in.is_internal
     )
     db.add(comment)
+    
+    audit = AuditLog(user_id=current_user.id, action="ADD_COMMENT", entity="COMMENT", entity_id=comment.id)
+    db.add(audit)
+    
+    # Notify assignee if the comment is made by someone else
+    if task.assigned_to_id and task.assigned_to_id != current_user.id:
+        notif = Notification(user_id=task.assigned_to_id, message=f"New comment on task: {task.title}")
+        db.add(notif)
+        
     db.commit()
     db.refresh(comment)
     return comment

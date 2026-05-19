@@ -6,10 +6,13 @@ import {
   ClipboardList, 
   User as UserIcon, 
   Columns, 
-  FileCheck, 
+  FileCheck,
+  FileBox,
+  Activity,
   LogOut,
   Menu,
-  X
+  X,
+  Bell
 } from 'lucide-react';
 
 const MainLayout = ({ children }) => {
@@ -24,10 +27,13 @@ const MainLayout = ({ children }) => {
     { icon: <LayoutDashboard size={20} />, label: 'Dashboard', path: '/' },
     { icon: <Columns size={20} />, label: 'Kanban Board', path: '/kanban' },
     { icon: <FileCheck size={20} />, label: 'Approvals', path: '/approvals' },
+    { icon: <FileBox size={20} />, label: 'Documents', path: '/documents' },
+    { icon: <Bell size={20} />, label: 'Notifications', path: '/notifications' },
   ];
 
   if (user.role === 'admin') {
     navItems.push({ icon: <UserIcon size={20} />, label: 'System Users', path: '/users' });
+    navItems.push({ icon: <Activity size={20} />, label: 'Audit Logs', path: '/audit-logs' });
   }
 
   return (

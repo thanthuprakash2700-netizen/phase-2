@@ -1,0 +1,2 @@
+Enterprise Collaboration Platform - Phase 3 Test Document Content.
+This file is used to verify document upload, version control, and real file download functionality.

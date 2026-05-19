@@ -11,6 +11,7 @@ from app.models.user import User
 from app.models.task import Task, StatusEnum
 from app.models.approval import Approval, ApprovalStatus
 from app.schemas.dashboard import DashboardSummary, TaskDistribution, PerformanceInsight
+from datetime import datetime
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -19,11 +20,23 @@ def get_dashboard_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
+    q = db.query(Task)
+    if current_user.role == "manager":
+        q = q.filter((Task.created_by_id == current_user.id) | (Task.assigned_to_id == current_user.id))
+    elif current_user.role == "employee":
+        q = q.filter(Task.assigned_to_id == current_user.id)
+        
     # Total tasks
-    total_tasks = db.query(Task).count()
+    total_tasks = q.count()
     
     # Tasks by status
-    status_counts = db.query(Task.status, func.count(Task.id)).group_by(Task.status).all()
+    status_counts = db.query(Task.status, func.count(Task.id))
+    if current_user.role == "manager":
+        status_counts = status_counts.filter((Task.created_by_id == current_user.id) | (Task.assigned_to_id == current_user.id))
+    elif current_user.role == "employee":
+        status_counts = status_counts.filter(Task.assigned_to_id == current_user.id)
+        
+    status_counts = status_counts.group_by(Task.status).all()
     tasks_by_status = {status.value: count for status, count in status_counts}
     
     # Ensure all statuses are present
@@ -32,7 +45,10 @@ def get_dashboard_summary(
             tasks_by_status[s.value] = 0
             
     # Pending approvals
-    pending_approvals = db.query(Approval).filter(Approval.status == ApprovalStatus.pending).count()
+    app_q = db.query(Approval).filter(Approval.status == ApprovalStatus.pending)
+    if current_user.role == "employee":
+        app_q = app_q.filter(Approval.requested_by_id == current_user.id)
+    pending_approvals = app_q.count()
     
     # Completed tasks
     completed_tasks = tasks_by_status.get(StatusEnum.done.value, 0)
@@ -49,7 +65,12 @@ def get_task_distribution(
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    status_counts = db.query(Task.status, func.count(Task.id)).group_by(Task.status).all()
+    status_counts = db.query(Task.status, func.count(Task.id))
+    if current_user.role == "manager":
+        status_counts = status_counts.filter((Task.created_by_id == current_user.id) | (Task.assigned_to_id == current_user.id))
+    elif current_user.role == "employee":
+        status_counts = status_counts.filter(Task.assigned_to_id == current_user.id)
+    status_counts = status_counts.group_by(Task.status).all()
     return [{"status": status.value, "count": count} for status, count in status_counts]
 
 @router.get("/performance", response_model=List[PerformanceInsight])
@@ -70,3 +91,33 @@ def get_performance_insights(
      .all()
     
     return [{"user_name": r.name, "completed_count": r.completed_count} for r in results]
+
+@router.get("/ai-summary")
+def get_ai_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    q = db.query(Task)
+    
+    if current_user.role == "manager":
+        q = q.filter((Task.created_by_id == current_user.id) | (Task.assigned_to_id == current_user.id))
+    elif current_user.role == "employee":
+        q = q.filter(Task.assigned_to_id == current_user.id)
+        
+    # Calculate simple AI-like insights
+    pending_tasks = q.filter(Task.status != StatusEnum.done).count()
+    high_priority = q.filter(Task.priority == "high", Task.status != StatusEnum.done).count()
+    delayed_tasks = q.filter(Task.due_date < datetime.utcnow(), Task.status != StatusEnum.done).count()
+    
+    insights = []
+    if pending_tasks > 0:
+        insights.append(f"{pending_tasks} tasks pending")
+    if high_priority > 0:
+        insights.append(f"{high_priority} high priority tasks pending")
+    if delayed_tasks > 0:
+        insights.append(f"{delayed_tasks} delayed tasks pending")
+        
+    if not insights:
+        insights.append("All caught up! No pending issues.")
+        
+    return {"insights": insights}

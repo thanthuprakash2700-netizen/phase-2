@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.api.routers import auth, users, tasks, approvals, dashboard
+from app.api.routers import auth, users, tasks, approvals, dashboard, documents, audit_logs, notifications
 
 app = FastAPI(title="Mini Enterprise Collaboration", version="0.1.0")
 
@@ -29,3 +29,6 @@ app.include_router(users.router)
 app.include_router(tasks.router)
 app.include_router(approvals.router)
 app.include_router(dashboard.router)
+app.include_router(documents.router, prefix="/documents", tags=["documents"])
+app.include_router(audit_logs.router, prefix="/audit-logs", tags=["audit-logs"])
+app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])

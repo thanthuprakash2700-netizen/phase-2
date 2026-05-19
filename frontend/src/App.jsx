@@ -7,7 +7,10 @@ import Dashboard from './pages/Dashboard';
 import Users from './pages/Users';
 import Kanban from './pages/Kanban';
 import Approvals from './pages/Approvals';
+import Documents from './pages/Documents';
+import AuditLogs from './pages/AuditLogs';
 import Unauthorized from './pages/Unauthorized';
+import Notifications from './pages/Notifications';
 
 import MainLayout from './layouts/MainLayout';
 
@@ -25,6 +28,9 @@ function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/kanban" element={<Kanban />} />
           <Route path="/approvals" element={<Approvals />} />
+          <Route path="/documents" element={<Documents />} />
+          <Route path="/notifications" element={<Notifications />} />
+          <Route path="/audit-logs" element={<PrivateRoute roles={['admin']}><AuditLogs /></PrivateRoute>} />
           <Route path="/users" element={<PrivateRoute roles={['admin']}><Users /></PrivateRoute>} />
         </Route>
       </Route>
